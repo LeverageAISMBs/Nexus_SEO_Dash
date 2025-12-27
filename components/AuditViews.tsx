@@ -1,7 +1,7 @@
 import React from 'react';
 import { WebsiteAudit, Recommendation, Keyword, ImpactLevel, EffortLevel } from '../types';
 import { Card, Badge, ScoreGauge } from './UIComponents';
-import { CheckCircle2, XCircle, AlertTriangle, ExternalLink, Zap, BarChart3, Clock, ArrowRight, Link as LinkIcon, Files } from 'lucide-react';
+import { CheckCircle2, XCircle, AlertTriangle, ExternalLink, Zap, BarChart3, Clock, ArrowRight, Link as LinkIcon, Files, Tag, MousePointerClick } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 // --- Dashboard View ---
@@ -49,12 +49,12 @@ export const DashboardView = ({ audit }: { audit: WebsiteAudit }) => {
                  </div>
                </div>
              )}
-             {audit.technical.metaTags.description.length < 50 && (
+             {audit.technical.metaTags.description.score < 60 && (
                <div className="flex items-start gap-3 p-3 bg-amber-900/10 border border-amber-900/30 rounded-lg">
                  <AlertTriangle className="text-amber-500 h-5 w-5 mt-0.5" />
                  <div>
-                   <div className="font-medium text-amber-200">Short Meta Description</div>
-                   <div className="text-xs text-amber-400">Current: {audit.technical.metaTags.description.length} chars. Target: 150-160.</div>
+                   <div className="font-medium text-amber-200">Meta Description Needs Attention</div>
+                   <div className="text-xs text-amber-400">Score: {audit.technical.metaTags.description.score}/100. Issues detected.</div>
                  </div>
                </div>
              )}
@@ -187,7 +187,7 @@ export const TechnicalView = ({ audit }: { audit: WebsiteAudit }) => {
                   {audit.technical.metaTags.title.length} chars
                 </Badge>
               </div>
-              <div className="font-mono text-sm bg-black/30 p-3 rounded text-blue-300">
+              <div className="font-mono text-sm bg-black/30 p-3 rounded text-blue-300 truncate">
                 {audit.technical.metaTags.title.content}
               </div>
               <ul className="mt-2 space-y-1">
@@ -202,13 +202,35 @@ export const TechnicalView = ({ audit }: { audit: WebsiteAudit }) => {
             <div>
               <div className="flex justify-between items-center mb-2">
                 <span className="font-semibold text-gray-200">Meta Description</span>
-                <Badge variant={audit.technical.metaTags.description.score > 50 ? 'success' : 'warning'}>
-                  {audit.technical.metaTags.description.length} chars
+                <Badge variant={audit.technical.metaTags.description.score >= 90 ? 'success' : audit.technical.metaTags.description.score >= 50 ? 'warning' : 'danger'}>
+                  Score: {audit.technical.metaTags.description.score}
                 </Badge>
               </div>
-              <div className="font-mono text-sm bg-black/30 p-3 rounded text-gray-400">
-                {audit.technical.metaTags.description.content}
+              <div className="font-mono text-sm bg-black/30 p-3 rounded text-gray-400 mb-3">
+                {audit.technical.metaTags.description.content || <span className="text-gray-600 italic">No description found</span>}
               </div>
+
+              {/* Keyword and CTA Indicators */}
+              <div className="flex gap-4 mb-3">
+                 <div className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded border ${audit.technical.metaTags.description.hasKeyword ? 'bg-emerald-900/20 text-emerald-400 border-emerald-900/50' : 'bg-rose-900/20 text-rose-400 border-rose-900/50'}`}>
+                    <Tag size={12} />
+                    {audit.technical.metaTags.description.hasKeyword ? 'Keyword Present' : 'Keyword Missing'}
+                 </div>
+                 <div className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded border ${audit.technical.metaTags.description.hasCTA ? 'bg-emerald-900/20 text-emerald-400 border-emerald-900/50' : 'bg-rose-900/20 text-rose-400 border-rose-900/50'}`}>
+                    <MousePointerClick size={12} />
+                    {audit.technical.metaTags.description.hasCTA ? 'CTA Present' : 'CTA Missing'}
+                 </div>
+              </div>
+
+              {audit.technical.metaTags.description.recommendations.length > 0 && (
+                <ul className="mt-2 space-y-1 border-t border-white/5 pt-2">
+                  {audit.technical.metaTags.description.recommendations.map((rec, i) => (
+                    <li key={i} className="text-xs text-nexus-warning flex items-center gap-1">
+                      <AlertTriangle size={12} /> {rec}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
         </Card>
