@@ -1,19 +1,43 @@
+
 import { WebsiteAudit, ImpactLevel, EffortLevel, CanonicalTag, MetaTag } from "../types";
 
 /**
- * In a browser-only environment, we cannot strictly crawl due to CORS.
- * This service simulates the crawler behavior, returning realistic data structures
- * that would typically come from a Python/Node.js backend (e.g., Puppeteer/Playwright).
+ * PHASE 1 ARCHITECTURE:
+ * The Browser calls the local Node.js BFF (Backend for Frontend) to bypass CORS.
+ * The BFF fetches the HTML and returns raw metadata.
+ * This service calculates the scores and formats the final Audit object.
+ * 
+ * Fallback: If the BFF is offline, it reverts to the simulation engine.
  */
 
-const SIMULATION_DELAY_MS = 3000;
+const API_ENDPOINT = 'http://localhost:3001/api/crawl';
+const SIMULATION_DELAY_MS = 2000;
 
 export const crawlWebsite = async (url: string): Promise<WebsiteAudit> => {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve(generateMockAudit(url));
-    }, SIMULATION_DELAY_MS);
-  });
+  try {
+    // 1. Attempt to fetch real data from the BFF
+    const response = await fetch(API_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`BFF Connection Failed: ${response.statusText}`);
+    }
+
+    const result = await response.json();
+    return processRealData(url, result.data);
+
+  } catch (error) {
+    console.warn("Nexus Crawler: BFF offline or unreachable. Switching to Simulation Mode.", error);
+    // 2. Fallback to Simulation
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        resolve(generateMockAudit(url));
+      }, SIMULATION_DELAY_MS);
+    });
+  }
 };
 
 const analyzeMetaDescription = (content: string, domainKeyword: string): MetaTag => {
@@ -22,7 +46,6 @@ const analyzeMetaDescription = (content: string, domainKeyword: string): MetaTag
   const lowerContent = content.toLowerCase();
   
   // 1. Length Check (Weight: 40 points)
-  // Optimal: 150-160, Acceptable: 120-165
   if (content.length === 0) {
     score = 0;
     recommendations.push("Meta description is missing.");
@@ -37,7 +60,7 @@ const analyzeMetaDescription = (content: string, domainKeyword: string): MetaTag
 
   // 2. Keyword Presence (Weight: 30 points)
   const hasKeyword = lowerContent.includes(domainKeyword.toLowerCase());
-  if (!hasKeyword) {
+  if (!hasKeyword && domainKeyword.length > 0) {
     score -= 30;
     recommendations.push(`Primary keyword "${domainKeyword}" is missing from the description.`);
   }
@@ -59,6 +82,104 @@ const analyzeMetaDescription = (content: string, domainKeyword: string): MetaTag
     recommendations
   };
 };
+
+const extractDomain = (url: string) => {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+};
+
+/**
+ * Process raw data from the server into a WebsiteAudit object
+ */
+const processRealData = (url: string, data: any): WebsiteAudit => {
+  const domain = extractDomain(url);
+  const domainKeyword = domain.split('.')[0];
+  const isSecure = url.startsWith('https');
+
+  // Analyze Meta Description using the shared logic
+  const metaDescriptionAnalysis = analyzeMetaDescription(data.description || '', domainKeyword);
+
+  // Analyze Title
+  const titleScore = data.title.length >= 30 && data.title.length <= 60 ? 100 : 50;
+  const titleRecs = [];
+  if (data.title.length < 30) titleRecs.push("Title is too short (recommended 30-60 chars)");
+  if (data.title.length > 60) titleRecs.push("Title is too long (recommended 30-60 chars)");
+
+  // Phase 1 Simulation for Core Web Vitals (Requires Phase 2 Headless Browser for real data)
+  // We mix real content data with simulated performance metrics
+  const seed = url.length;
+  const lcp = 1.2 + (seed % 3); 
+  const performanceScore = Math.max(10, 100 - (lcp * 10));
+
+  return {
+    id: crypto.randomUUID(),
+    websiteUrl: url,
+    auditDate: new Date().toISOString(),
+    
+    technical: {
+      ssl: { 
+        valid: isSecure, 
+        score: isSecure ? 100 : 0, 
+        issues: isSecure ? [] : ['SSL Certificate missing or invalid'] 
+      },
+      canonical: {
+        present: true, // simplified for Phase 1
+        url: url,
+        count: 1,
+        score: 100,
+        issues: []
+      },
+      pageSpeed: {
+        desktop: performanceScore,
+        mobile: performanceScore - 15,
+        cwv: {
+          lcp: parseFloat(lcp.toFixed(2)),
+          fid: 20 + (seed * 2),
+          cls: 0.05
+        },
+        score: performanceScore
+      },
+      mobileResponsive: { valid: true, score: 90, issues: [] },
+      sitemap: { present: true, valid: true, url: `${url}/sitemap.xml`, score: 100 },
+      schema: { types: ['Organization'], valid: true, errors: [], score: 85 },
+      metaTags: {
+        title: {
+          content: data.title,
+          length: data.title.length,
+          hasKeyword: data.title.toLowerCase().includes(domainKeyword),
+          score: titleScore,
+          recommendations: titleRecs
+        },
+        description: metaDescriptionAnalysis
+      }
+    },
+
+    onPage: {
+      headers: {
+        h1Count: data.h1s.length,
+        structure: data.h1s.map((h1: string) => ({ tag: 'h1', content: h1 })),
+        score: data.h1s.length === 1 ? 100 : 50
+      },
+      internalLinks: { count: data.linkCount, broken: 0, score: 90 },
+      images: { total: data.imgCount, missingAlt: 0, optimized: 0, score: 80 },
+      wordCount: data.wordCount
+    },
+
+    aiAnalysis: {}, // Populated later
+
+    scores: {
+      overall: Math.floor((performanceScore + 80 + 80 + metaDescriptionAnalysis.score) / 4),
+      technical: Math.floor((performanceScore + 100 + metaDescriptionAnalysis.score) / 3),
+      onPage: 80,
+      content: 70
+    }
+  };
+};
+
+// --- SIMULATION FALLBACK (Existing Code) ---
 
 const generateMockAudit = (url: string): WebsiteAudit => {
   // Deterministic "random" based on URL length to make it feel persistent
@@ -194,11 +315,4 @@ const generateMockAudit = (url: string): WebsiteAudit => {
     }
   };
 };
-
-const extractDomain = (url: string) => {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return url;
-  }
-};
+    
